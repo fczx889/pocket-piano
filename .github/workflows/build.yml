@@ -1,0 +1,218 @@
+
+name: Build Pocket Piano APK
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main, master]
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Install Android SDK
+        run: |
+          sdkmanager "platforms;android-35" "build-tools;35.0.0"
+          echo "sdk.dir=$ANDROID_HOME" > local.properties
+
+      - name: Create project files
+        shell: bash
+        run: |
+          mkdir -p app/src/main/java/com/pocketpiano/app
+          mkdir -p app/src/main/assets
+
+          cat > settings.gradle <<'EOF'
+          pluginManagement {
+              repositories {
+                  google()
+                  mavenCentral()
+                  gradlePluginPortal()
+              }
+          }
+          dependencyResolutionManagement {
+              repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
+              repositories {
+                  google()
+                  mavenCentral()
+              }
+          }
+          rootProject.name = "PocketPiano"
+          include ':app'
+          EOF
+
+          cat > build.gradle <<'EOF'
+          plugins {
+              id 'com.android.application' version '8.7.3' apply false
+          }
+          EOF
+
+          cat > app/build.gradle <<'EOF'
+          plugins {
+              id 'com.android.application'
+          }
+          android {
+              namespace 'com.pocketpiano.app'
+              compileSdk 35
+              defaultConfig {
+                  applicationId 'com.pocketpiano.app'
+                  minSdk 23
+                  targetSdk 28
+                  versionCode 1
+                  versionName '1.0'
+              }
+          }
+          EOF
+
+          cat > app/src/main/AndroidManifest.xml <<'EOF'
+          <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+              <application
+                  android:theme="@android:style/Theme.Material.Light.NoActionBar"
+                  android:label="口袋钢琴"
+                  android:usesCleartextTraffic="false">
+                  <activity
+                      android:name=".MainActivity"
+                      android:screenOrientation="unspecified"
+                      android:exported="true">
+                      <intent-filter>
+                          <action android:name="android.intent.action.MAIN"/>
+                          <category android:name="android.intent.category.LAUNCHER"/>
+                      </intent-filter>
+                  </activity>
+              </application>
+          </manifest>
+          EOF
+
+          cat > app/src/main/java/com/pocketpiano/app/MainActivity.java <<'EOF'
+          package com.pocketpiano.app;
+
+          import android.app.Activity;
+          import android.os.Bundle;
+          import android.webkit.WebView;
+          import android.webkit.WebSettings;
+
+          public class MainActivity extends Activity {
+              @Override
+              public void onCreate(Bundle state) {
+                  super.onCreate(state);
+                  WebView web = new WebView(this);
+                  WebSettings settings = web.getSettings();
+                  settings.setJavaScriptEnabled(true);
+                  web.setBackgroundColor(0xFFFFF8F0);
+                  setContentView(web);
+                  web.loadUrl("file:///android_asset/index.html");
+              }
+          }
+          EOF
+
+          cat > app/src/main/assets/index.html <<'EOF'
+          <!DOCTYPE html>
+          <html lang="zh">
+          <head>
+          <meta charset="UTF-8">
+          <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+          <title>口袋钢琴</title>
+          <style>
+          *{box-sizing:border-box}
+          body{margin:0;background:#fff8ef;color:#34264a;font-family:system-ui;text-align:center}
+          header{padding:24px 12px 12px;background:#7554a8;color:white}
+          h1{margin:0;font-size:28px}
+          p{margin:10px}
+          .panel{padding:18px 8px}
+          button{font-size:16px;border:0;border-radius:12px;padding:12px 16px;margin:5px;background:#7554a8;color:white}
+          .keys{display:flex;height:210px;margin:20px 5px;position:relative}
+          .key{flex:1;min-width:0;border:1px solid #444;border-radius:0 0 8px 8px;background:white;color:#333;display:flex;align-items:flex-end;justify-content:center;padding-bottom:12px;font-size:12px;touch-action: manipulation}
+          .key:active{background:#e5d9ff}
+          .hint{font-size:14px;line-height:1.8}
+          #lesson{background:#fff;border-radius:16px;padding:16px;margin:12px}
+          </style>
+          </head>
+          <body>
+          <header><h1>🎹 口袋钢琴</h1><p>随时随地，弹奏你的音乐</p></header>
+          <div class="panel">
+          <button onclick="playSong()">▶ 播放练习曲</button>
+          <button onclick="stopSong()">■ 停止</button>
+          <div class="keys" id="keys"></div>
+          <div id="lesson">
+          <h3>🎵 新手教程</h3>
+          <div class="hint">白键从左到右：Do、Re、Mi、Fa、Sol、La、Si、Do<br>先按顺序弹奏，再尝试下面的练习曲。</div>
+          <button onclick="lesson()">开始教学</button>
+          <p id="tip">点击任意琴键开始演奏！</p>
+          </div>
+          </div>
+          <script>
+          const names=['Do','Re','Mi','Fa','Sol','La','Si','Do'];
+          const freqs=[261.63,293.66,329.63,349.23,392,440,493.88,523.25];
+          let ctx=null, timers=[];
+          function play(i){
+            try{
+              ctx=ctx||new(window.AudioContext||window.webkitAudioContext)();
+              if(ctx.state==='suspended')ctx.resume();
+              const o=ctx.createOscillator(),g=ctx.createGain();
+              o.type='sine';o.frequency.value=freqs[i];
+              g.gain.setValueAtTime(0.0001,ctx.currentTime);
+              g.gain.exponentialRampToValueAtTime(0.3,ctx.currentTime+0.02);
+              g.gain.exponentialRampToValueAtTime(0.0001,ctx.currentTime+0.7);
+              o.connect(g);g.connect(ctx.destination);o.start();o.stop(ctx.currentTime+0.72);
+            }catch(e){}
+          }
+          names.forEach((n,i)=>{
+            const b=document.createElement('button');
+            b.className='key';b.textContent=n;
+            b.style.background='#fff';b.style.color='#333';b.style.margin='0';
+            b.addEventListener('pointerdown',e=>{e.preventDefault();play(i)});
+            document.getElementById('keys').appendChild(b);
+          });
+          function stopSong(){timers.forEach(clearTimeout);timers=[]}
+          function playSong(){
+            stopSong();
+            [0,0,4,4,5,5,4,3,3,2,2,1,1,0].forEach((n,i)=>{
+              timers.push(setTimeout(()=>play(n),i*450));
+            });
+          }
+          let lessonStep=0;
+          function lesson(){
+            lessonStep=0;
+            const tip=document.getElementById('tip');
+            const next=()=>{
+              if(lessonStep>=names.length){
+                tip.textContent='太棒了！第一课完成 🎉';return;
+              }
+              tip.textContent='请点击 '+names[lessonStep]+' 键';
+              const keys=document.querySelectorAll('.key');
+              keys.forEach((k,i)=>k.onclick=null);
+              keys[lessonStep].onclick=()=>{
+                play(lessonStep);lessonStep++;next();
+              };
+            };next();
+          }
+          </script>
+          </body>
+          </html>
+          EOF
+
+      - name: Download Gradle
+        run: |
+          wget -q https://services.gradle.org/distributions/gradle-8.9-bin.zip
+          unzip -q gradle-8.9-bin.zip
+          echo "$GITHUB_WORKSPACE/gradle-8.9/bin" >> "$GITHUB_PATH"
+
+      - name: Build APK
+        run: gradle --no-daemon assembleDebug
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: pocket-piano-apk
+          path: app/build/outputs/apk/debug/app-debug.apk
