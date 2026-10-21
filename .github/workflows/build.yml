@@ -4,7 +4,9 @@ name: Build Pocket Piano APK
 on:
   workflow_dispatch:
   push:
-    branches: [main, master]
+    branches:
+      - main
+      - master
 
 permissions:
   contents: read
@@ -12,22 +14,23 @@ permissions:
 jobs:
   build:
     runs-on: ubuntu-latest
+
     steps:
-      - name: Checkout
+      - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Set up Java
+      - name: Set up Java 17
         uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: '17'
 
-      - name: Install Android SDK
-        run: |
-          sdkmanager "platforms;android-35" "build-tools;35.0.0"
-          echo "sdk.dir=$ANDROID_HOME" > local.properties
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v4
+        with:
+          packages: 'platforms;android-35,build-tools;35.0.0'
 
-      - name: Create project files
+      - name: Create Android project
         shell: bash
         run: |
           mkdir -p app/src/main/java/com/pocketpiano/app
@@ -62,9 +65,11 @@ jobs:
           plugins {
               id 'com.android.application'
           }
+
           android {
               namespace 'com.pocketpiano.app'
               compileSdk 35
+
               defaultConfig {
                   applicationId 'com.pocketpiano.app'
                   minSdk 23
@@ -78,12 +83,10 @@ jobs:
           cat > app/src/main/AndroidManifest.xml <<'EOF'
           <manifest xmlns:android="http://schemas.android.com/apk/res/android">
               <application
-                  android:theme="@android:style/Theme.Material.Light.NoActionBar"
                   android:label="口袋钢琴"
-                  android:usesCleartextTraffic="false">
+                  android:theme="@android:style/Theme.Material.Light.NoActionBar">
                   <activity
                       android:name=".MainActivity"
-                      android:screenOrientation="unspecified"
                       android:exported="true">
                       <intent-filter>
                           <action android:name="android.intent.action.MAIN"/>
@@ -109,7 +112,7 @@ jobs:
                   WebView web = new WebView(this);
                   WebSettings settings = web.getSettings();
                   settings.setJavaScriptEnabled(true);
-                  web.setBackgroundColor(0xFFFFF8F0);
+                  web.setBackgroundColor(0xFFFFF8EF);
                   setContentView(web);
                   web.loadUrl("file:///android_asset/index.html");
               }
@@ -128,25 +131,25 @@ jobs:
           body{margin:0;background:#fff8ef;color:#34264a;font-family:system-ui;text-align:center}
           header{padding:24px 12px 12px;background:#7554a8;color:white}
           h1{margin:0;font-size:28px}
-          p{margin:10px}
-          .panel{padding:18px 8px}
-          button{font-size:16px;border:0;border-radius:12px;padding:12px 16px;margin:5px;background:#7554a8;color:white}
-          .keys{display:flex;height:210px;margin:20px 5px;position:relative}
-          .key{flex:1;min-width:0;border:1px solid #444;border-radius:0 0 8px 8px;background:white;color:#333;display:flex;align-items:flex-end;justify-content:center;padding-bottom:12px;font-size:12px;touch-action: manipulation}
+          .panel{padding:16px 6px}
+          .controls button,.lesson button{border:0;border-radius:12px;padding:12px 16px;margin:5px;background:#7554a8;color:white;font-size:16px}
+          .keys{display:flex;height:210px;margin:20px 2px}
+          .key{flex:1;min-width:0;border:1px solid #444;background:white;color:#333;display:flex;align-items:flex-end;justify-content:center;padding:0 0 12px;font-size:11px;touch-action:manipulation}
           .key:active{background:#e5d9ff}
-          .hint{font-size:14px;line-height:1.8}
-          #lesson{background:#fff;border-radius:16px;padding:16px;margin:12px}
+          .lesson{background:white;border-radius:16px;padding:14px;margin:12px 4px}
           </style>
           </head>
           <body>
           <header><h1>🎹 口袋钢琴</h1><p>随时随地，弹奏你的音乐</p></header>
           <div class="panel">
+          <div class="controls">
           <button onclick="playSong()">▶ 播放练习曲</button>
           <button onclick="stopSong()">■ 停止</button>
+          </div>
           <div class="keys" id="keys"></div>
-          <div id="lesson">
+          <div class="lesson">
           <h3>🎵 新手教程</h3>
-          <div class="hint">白键从左到右：Do、Re、Mi、Fa、Sol、La、Si、Do<br>先按顺序弹奏，再尝试下面的练习曲。</div>
+          <p>白键从左到右：Do、Re、Mi、Fa、Sol、La、Si、Do</p>
           <button onclick="lesson()">开始教学</button>
           <p id="tip">点击任意琴键开始演奏！</p>
           </div>
@@ -154,55 +157,62 @@ jobs:
           <script>
           const names=['Do','Re','Mi','Fa','Sol','La','Si','Do'];
           const freqs=[261.63,293.66,329.63,349.23,392,440,493.88,523.25];
-          let ctx=null, timers=[];
+          let ctx=null,timers=[],lessonStep=-1;
           function play(i){
-            try{
-              ctx=ctx||new(window.AudioContext||window.webkitAudioContext)();
-              if(ctx.state==='suspended')ctx.resume();
-              const o=ctx.createOscillator(),g=ctx.createGain();
-              o.type='sine';o.frequency.value=freqs[i];
-              g.gain.setValueAtTime(0.0001,ctx.currentTime);
-              g.gain.exponentialRampToValueAtTime(0.3,ctx.currentTime+0.02);
-              g.gain.exponentialRampToValueAtTime(0.0001,ctx.currentTime+0.7);
-              o.connect(g);g.connect(ctx.destination);o.start();o.stop(ctx.currentTime+0.72);
-            }catch(e){}
+            ctx=ctx||new(window.AudioContext||window.webkitAudioContext)();
+            if(ctx.state==='suspended')ctx.resume();
+            const o=ctx.createOscillator(),g=ctx.createGain();
+            o.type='sine';o.frequency.value=freqs[i];
+            g.gain.setValueAtTime(0.0001,ctx.currentTime);
+            g.gain.exponentialRampToValueAtTime(0.25,ctx.currentTime+0.02);
+            g.gain.exponentialRampToValueAtTime(0.0001,ctx.currentTime+0.65);
+            o.connect(g);g.connect(ctx.destination);
+            o.start();o.stop(ctx.currentTime+0.7);
           }
-          names.forEach((n,i)=>{
+          const keyBox=document.getElementById('keys');
+          names.forEach((name,i)=>{
             const b=document.createElement('button');
-            b.className='key';b.textContent=n;
-            b.style.background='#fff';b.style.color='#333';b.style.margin='0';
-            b.addEventListener('pointerdown',e=>{e.preventDefault();play(i)});
-            document.getElementById('keys').appendChild(b);
+            b.className='key';b.textContent=name;
+            b.addEventListener('pointerdown',e=>{
+              e.preventDefault();play(i);
+              if(lessonStep>=0){
+                if(i===lessonStep){
+                  lessonStep++;
+                  showLesson();
+                }else{
+                  document.getElementById('tip').textContent='再试一次，点击正确的琴键哦';
+                }
+              }
+            });
+            keyBox.appendChild(b);
           });
-          function stopSong(){timers.forEach(clearTimeout);timers=[]}
+          function stopSong(){
+            timers.forEach(clearTimeout);timers=[];
+          }
           function playSong(){
             stopSong();
             [0,0,4,4,5,5,4,3,3,2,2,1,1,0].forEach((n,i)=>{
               timers.push(setTimeout(()=>play(n),i*450));
             });
           }
-          let lessonStep=0;
           function lesson(){
-            lessonStep=0;
+            lessonStep=0;showLesson();
+          }
+          function showLesson(){
             const tip=document.getElementById('tip');
-            const next=()=>{
-              if(lessonStep>=names.length){
-                tip.textContent='太棒了！第一课完成 🎉';return;
-              }
+            if(lessonStep>=names.length){
+              lessonStep=-1;
+              tip.textContent='太棒了！第一课完成 🎉';
+            }else{
               tip.textContent='请点击 '+names[lessonStep]+' 键';
-              const keys=document.querySelectorAll('.key');
-              keys.forEach((k,i)=>k.onclick=null);
-              keys[lessonStep].onclick=()=>{
-                play(lessonStep);lessonStep++;next();
-              };
-            };next();
+            }
           }
           </script>
           </body>
           </html>
           EOF
 
-      - name: Download Gradle
+      - name: Set up Gradle
         run: |
           wget -q https://services.gradle.org/distributions/gradle-8.9-bin.zip
           unzip -q gradle-8.9-bin.zip
@@ -216,3 +226,5 @@ jobs:
         with:
           name: pocket-piano-apk
           path: app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
+          retention-days: 7
