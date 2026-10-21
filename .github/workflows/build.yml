@@ -13,7 +13,11 @@ permissions:
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
+
+    env:
+      ANDROID_HOME: /usr/local/lib/android/sdk
+      ANDROID_SDK_ROOT: /usr/local/lib/android/sdk
 
     steps:
       - name: Checkout repository
@@ -25,14 +29,22 @@ jobs:
           distribution: temurin
           java-version: '17'
 
-      - name: Set up Android SDK
-        uses: android-actions/setup-android@v4
-        with:
-          packages: 'platforms;android-35,build-tools;35.0.0'
+      - name: Verify Android SDK
+        shell: bash
+        run: |
+          set -eux
+          echo "ANDROID_HOME=$ANDROID_HOME"
+          test -d "$ANDROID_HOME"
+          ls -la "$ANDROID_HOME"
+          find "$ANDROID_HOME/cmdline-tools" -name sdkmanager -type f 2>/dev/null || true
+          test -d "$ANDROID_HOME/platforms/android-35"
+          test -d "$ANDROID_HOME/build-tools/35.0.0"
+          echo "Android SDK verified"
 
       - name: Create Android project
         shell: bash
         run: |
+          set -eux
           mkdir -p app/src/main/java/com/pocketpiano/app
           mkdir -p app/src/main/assets
 
@@ -158,23 +170,29 @@ jobs:
           const names=['Do','Re','Mi','Fa','Sol','La','Si','Do'];
           const freqs=[261.63,293.66,329.63,349.23,392,440,493.88,523.25];
           let ctx=null,timers=[],lessonStep=-1;
+
           function play(i){
             ctx=ctx||new(window.AudioContext||window.webkitAudioContext)();
             if(ctx.state==='suspended')ctx.resume();
             const o=ctx.createOscillator(),g=ctx.createGain();
-            o.type='sine';o.frequency.value=freqs[i];
+            o.type='sine';
+            o.frequency.value=freqs[i];
             g.gain.setValueAtTime(0.0001,ctx.currentTime);
             g.gain.exponentialRampToValueAtTime(0.25,ctx.currentTime+0.02);
             g.gain.exponentialRampToValueAtTime(0.0001,ctx.currentTime+0.65);
-            o.connect(g);g.connect(ctx.destination);
-            o.start();o.stop(ctx.currentTime+0.7);
+            o.connect(g);
+            g.connect(ctx.destination);
+            o.start();
+            o.stop(ctx.currentTime+0.7);
           }
-          const keyBox=document.getElementById('keys');
+
           names.forEach((name,i)=>{
             const b=document.createElement('button');
-            b.className='key';b.textContent=name;
+            b.className='key';
+            b.textContent=name;
             b.addEventListener('pointerdown',e=>{
-              e.preventDefault();play(i);
+              e.preventDefault();
+              play(i);
               if(lessonStep>=0){
                 if(i===lessonStep){
                   lessonStep++;
@@ -184,20 +202,26 @@ jobs:
                 }
               }
             });
-            keyBox.appendChild(b);
+            document.getElementById('keys').appendChild(b);
           });
+
           function stopSong(){
-            timers.forEach(clearTimeout);timers=[];
+            timers.forEach(clearTimeout);
+            timers=[];
           }
+
           function playSong(){
             stopSong();
             [0,0,4,4,5,5,4,3,3,2,2,1,1,0].forEach((n,i)=>{
               timers.push(setTimeout(()=>play(n),i*450));
             });
           }
+
           function lesson(){
-            lessonStep=0;showLesson();
+            lessonStep=0;
+            showLesson();
           }
+
           function showLesson(){
             const tip=document.getElementById('tip');
             if(lessonStep>=names.length){
